@@ -15,6 +15,9 @@ const MAX_SECRET_REFERENCES: usize = 100;
 const MAX_REFERENCE_BYTES: usize = 4 * 1024;
 const MAX_REFERENCE_INPUT_BYTES: usize = 128 * 1024;
 const MAX_ACCOUNT_BYTES: usize = 4 * 1024;
+const MAX_ITEM_BATCH: usize = 100;
+const MAX_ITEM_JSON_BYTES: usize = 1024 * 1024;
+const MAX_ITEM_BATCH_JSON_BYTES: usize = 8 * 1024 * 1024;
 
 /// SDK result type.
 pub type Result<T> = std::result::Result<T, Error>;
@@ -143,7 +146,7 @@ impl Client {
         Secrets { client: self }
     }
 
-    /// Access the read-only items API.
+    /// Access the item-management API.
     pub fn items(&mut self) -> Items<'_> {
         Items { client: self }
     }
@@ -225,12 +228,32 @@ impl Vaults<'_> {
     }
 }
 
-/// Read-only item operations.
+/// Item-management operations.
+///
+/// Item values intentionally use raw JSON while this crate validates the
+/// transport against the official SDK before committing to generated model types.
 pub struct Items<'a> {
     client: &'a mut Client,
 }
 
 impl Items<'_> {
+    /// Create one item from an official-SDK `ItemCreateParams` JSON object.
+    pub fn create(&mut self, params: Value) -> Result<Value> {
+        validate_item_json("item create params", &params)?;
+        self.client
+            .invoke("ItemsCreate", json!({ "params": params }))
+    }
+
+    /// Create up to 100 items in one vault using official-SDK `ItemCreateParams` JSON objects.
+    pub fn create_all(&mut self, vault_id: &str, params: Vec<Value>) -> Result<Value> {
+        validate_identifier("vault ID", vault_id)?;
+        validate_item_batch("item create batch", &params)?;
+        self.client.invoke(
+            "ItemsCreateAll",
+            json!({ "vault_id": vault_id, "params": params }),
+        )
+    }
+
     /// Get one decrypted item by vault and item ID.
     ///
     /// The returned JSON follows the 1Password SDK item schema. Keeping this
@@ -248,23 +271,49 @@ impl Items<'_> {
     /// Get multiple decrypted items from one vault in one SDK invocation.
     pub fn get_all<S: AsRef<str>>(&mut self, vault_id: &str, item_ids: &[S]) -> Result<Value> {
         validate_identifier("vault ID", vault_id)?;
-        if item_ids.is_empty() || item_ids.len() > 100 {
-            return Err(Error::InvalidArgument(
-                "item batch must contain between 1 and 100 IDs".to_owned(),
-            ));
-        }
-        let item_ids = item_ids
-            .iter()
-            .map(|id| id.as_ref())
-            .map(|id| {
-                validate_identifier("item ID", id)?;
-                Ok(id.to_owned())
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let item_ids = validate_item_ids(item_ids)?;
         self.client.invoke(
             "ItemsGetAll",
             json!({ "vault_id": vault_id, "item_ids": item_ids }),
         )
+    }
+
+    /// Replace an existing item using an official-SDK `Item` JSON object.
+    pub fn put(&mut self, item: Value) -> Result<Value> {
+        validate_item_json("item", &item)?;
+        self.client.invoke("ItemsPut", json!({ "item": item }))
+    }
+
+    /// Permanently delete one item.
+    pub fn delete(&mut self, vault_id: &str, item_id: &str) -> Result<()> {
+        validate_identifier("vault ID", vault_id)?;
+        validate_identifier("item ID", item_id)?;
+        self.client.invoke(
+            "ItemsDelete",
+            json!({ "vault_id": vault_id, "item_id": item_id }),
+        )?;
+        Ok(())
+    }
+
+    /// Permanently delete up to 100 items from one vault.
+    pub fn delete_all<S: AsRef<str>>(&mut self, vault_id: &str, item_ids: &[S]) -> Result<Value> {
+        validate_identifier("vault ID", vault_id)?;
+        let item_ids = validate_item_ids(item_ids)?;
+        self.client.invoke(
+            "ItemsDeleteAll",
+            json!({ "vault_id": vault_id, "item_ids": item_ids }),
+        )
+    }
+
+    /// Archive one item.
+    pub fn archive(&mut self, vault_id: &str, item_id: &str) -> Result<()> {
+        validate_identifier("vault ID", vault_id)?;
+        validate_identifier("item ID", item_id)?;
+        self.client.invoke(
+            "ItemsArchive",
+            json!({ "vault_id": vault_id, "item_id": item_id }),
+        )?;
+        Ok(())
     }
 
     /// List active items in a vault.
@@ -278,6 +327,56 @@ impl Items<'_> {
             .cloned()
             .ok_or_else(|| Error::Protocol("items list response was not an array".to_owned()))
     }
+}
+
+fn validate_item_json(kind: &str, value: &Value) -> Result<()> {
+    if !value.is_object() {
+        return Err(Error::InvalidArgument(format!(
+            "{kind} must be a JSON object"
+        )));
+    }
+    let size = serde_json::to_vec(value).map_err(protocol_error)?.len();
+    if size > MAX_ITEM_JSON_BYTES {
+        return Err(Error::InvalidArgument(format!(
+            "{kind} exceeds {MAX_ITEM_JSON_BYTES} bytes"
+        )));
+    }
+    Ok(())
+}
+
+fn validate_item_batch(kind: &str, values: &[Value]) -> Result<()> {
+    if values.is_empty() || values.len() > MAX_ITEM_BATCH {
+        return Err(Error::InvalidArgument(format!(
+            "{kind} must contain between 1 and {MAX_ITEM_BATCH} items"
+        )));
+    }
+    let mut total = 0usize;
+    for value in values {
+        validate_item_json("item", value)?;
+        total = total.saturating_add(serde_json::to_vec(value).map_err(protocol_error)?.len());
+        if total > MAX_ITEM_BATCH_JSON_BYTES {
+            return Err(Error::InvalidArgument(format!(
+                "{kind} exceeds {MAX_ITEM_BATCH_JSON_BYTES} bytes"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_item_ids<S: AsRef<str>>(item_ids: &[S]) -> Result<Vec<String>> {
+    if item_ids.is_empty() || item_ids.len() > MAX_ITEM_BATCH {
+        return Err(Error::InvalidArgument(format!(
+            "item batch must contain between 1 and {MAX_ITEM_BATCH} IDs"
+        )));
+    }
+    item_ids
+        .iter()
+        .map(|id| id.as_ref())
+        .map(|id| {
+            validate_identifier("item ID", id)?;
+            Ok(id.to_owned())
+        })
+        .collect()
 }
 
 fn validate_identifier(kind: &str, value: &str) -> Result<()> {
@@ -511,6 +610,20 @@ mod tests {
             extract_secrets(&result, &refs).unwrap(),
             vec!["beta", "alpha", "beta"]
         );
+    }
+
+    #[test]
+    fn item_write_inputs_are_bounded_and_errors_do_not_echo_values() {
+        let invalid = json!("sensitive-canary");
+        let error = validate_item_json("item", &invalid).unwrap_err();
+        assert!(!error.to_string().contains("sensitive-canary"));
+
+        assert!(validate_item_json("item", &json!({"title": "ok"})).is_ok());
+        assert!(validate_item_batch("items", &[]).is_err());
+        assert!(validate_item_batch("items", &vec![json!({}); 101]).is_err());
+        assert!(validate_item_ids::<&str>(&[]).is_err());
+        assert!(validate_item_ids(&["item-1", "item-2"]).is_ok());
+        assert!(validate_item_ids(&vec!["item"; 101]).is_err());
     }
 
     #[test]

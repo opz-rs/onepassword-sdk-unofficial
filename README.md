@@ -16,6 +16,9 @@ Implemented:
 - persistent `Client`
 - `secrets().resolve()`
 - `secrets().resolve_all()` (up to 100 references per invocation)
+- `vaults().list()`
+- `items().list()`, `get()`, and `get_all()`
+- `items().create()`, `create_all()`, `put()`, `delete()`, `delete_all()`, and `archive()` using official-SDK JSON shapes
 - retry after a desktop-session-expired response
 - explicit release of the SDK client on drop
 - bounded inputs and sanitized upstream errors
@@ -25,7 +28,7 @@ Planned:
 
 - Windows desktop transport
 - service-account authentication
-- items/vault APIs
+- typed Rust item/vault models over the current raw-JSON compatibility surface
 - conformance tests against the official Go / JavaScript / Python SDKs
 - adoption by `opz`, then replacement of the experimental 1Password sidecar in `temote-mcp`
 
@@ -58,7 +61,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-Batch resolution keeps one authenticated client alive. Prefer one long-lived `Client` and `resolve_all` calls over repeatedly creating clients; a single call accepts up to 100 references. Desktop authorization happens when the client is initialized, while subsequent secret resolutions reuse the authenticated client. If the desktop session expires, the SDK reinitializes the client once and retries.
+Batch resolution keeps one authenticated client alive. Prefer one long-lived `Client` and `resolve_all` calls over repeatedly creating clients; a single call accepts up to 100 references. Desktop authorization happens when the client is initialized, while subsequent secret resolutions and item operations reuse the authenticated client. If the desktop session expires, the SDK reinitializes the client once and retries.
+
+Item management currently accepts and returns `serde_json::Value` objects matching the official SDK schemas. This keeps the compatibility layer small while `opz` dogfoods create/update/delete behavior; typed Rust models can be added later without coupling transport correctness to a large generated type surface. Write calls are bounded to 1 MiB per item and 100 items / 8 MiB per batch.
 
 
 ```rust,no_run
@@ -91,6 +96,7 @@ Accordingly this repository keeps transport details private and treats the curre
 - Upstream error payloads are sanitized before becoming public errors.
 - Desktop authentication does not require this crate to persist the account password.
 - Secret references are bounded to 100 entries, 4 KiB each, and 128 KiB total per batch.
+- Raw item writes are bounded to 1 MiB per item and 100 items / 8 MiB per batch; validation errors never include item contents.
 - This crate does not read or write the local 1Password SQLite database.
 
 ## License
