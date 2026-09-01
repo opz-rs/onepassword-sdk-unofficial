@@ -8,7 +8,6 @@
 mod transport;
 
 use serde_json::{Value, json};
-use thiserror::Error;
 
 const SDK_CORE_BUILD: &str = "0040102"; // Compatible with official Go SDK v0.4.1.
 
@@ -21,23 +20,40 @@ const MAX_ACCOUNT_BYTES: usize = 4 * 1024;
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Errors returned by the unofficial SDK.
-#[derive(Debug, Error)]
+#[derive(Debug)]
 pub enum Error {
-    #[error("unsupported platform: {0}")]
     UnsupportedPlatform(&'static str),
-    #[error("invalid argument: {0}")]
     InvalidArgument(String),
-    #[error("1Password desktop SDK is unavailable: {0}")]
     Unavailable(String),
-    #[error("1Password desktop authorization was denied")]
     AuthorizationDenied,
-    #[error("1Password desktop session expired")]
     DesktopSessionExpired,
-    #[error("1Password could not resolve one or more secret references")]
     SecretResolutionFailed,
-    #[error("1Password SDK protocol error: {0}")]
     Protocol(String),
 }
+
+impl std::fmt::Display for Error {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::UnsupportedPlatform(message) => {
+                write!(formatter, "unsupported platform: {message}")
+            }
+            Self::InvalidArgument(message) => write!(formatter, "invalid argument: {message}"),
+            Self::Unavailable(message) => {
+                write!(formatter, "1Password desktop SDK is unavailable: {message}")
+            }
+            Self::AuthorizationDenied => {
+                formatter.write_str("1Password desktop authorization was denied")
+            }
+            Self::DesktopSessionExpired => formatter.write_str("1Password desktop session expired"),
+            Self::SecretResolutionFailed => {
+                formatter.write_str("1Password could not resolve one or more secret references")
+            }
+            Self::Protocol(message) => write!(formatter, "1Password SDK protocol error: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for Error {}
 
 /// Desktop-app authentication configuration.
 #[derive(Clone, Debug, PartialEq, Eq)]
