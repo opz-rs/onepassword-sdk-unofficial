@@ -143,6 +143,16 @@ impl Client {
         Secrets { client: self }
     }
 
+    /// Access the read-only items API.
+    pub fn items(&mut self) -> Items<'_> {
+        Items { client: self }
+    }
+
+    /// Access the read-only vaults API.
+    pub fn vaults(&mut self) -> Vaults<'_> {
+        Vaults { client: self }
+    }
+
     fn invoke(&mut self, name: &str, parameters: Value) -> Result<Value> {
         let request = json!({
             "invocation": {
@@ -195,6 +205,88 @@ impl Drop for Client {
                 .call(self.auth.account(), "release_client", &payload);
         }
     }
+}
+
+/// Read-only vault operations.
+pub struct Vaults<'a> {
+    client: &'a mut Client,
+}
+
+impl Vaults<'_> {
+    /// List vault overviews visible to the authenticated desktop account.
+    pub fn list(&mut self) -> Result<Vec<Value>> {
+        let result = self
+            .client
+            .invoke("VaultsList", json!({ "params": null }))?;
+        result
+            .as_array()
+            .cloned()
+            .ok_or_else(|| Error::Protocol("vaults list response was not an array".to_owned()))
+    }
+}
+
+/// Read-only item operations.
+pub struct Items<'a> {
+    client: &'a mut Client,
+}
+
+impl Items<'_> {
+    /// Get one decrypted item by vault and item ID.
+    ///
+    /// The returned JSON follows the 1Password SDK item schema. Keeping this
+    /// surface as JSON lets the crate prove the Desktop SDK transport before
+    /// committing to a large generated model API.
+    pub fn get(&mut self, vault_id: &str, item_id: &str) -> Result<Value> {
+        validate_identifier("vault ID", vault_id)?;
+        validate_identifier("item ID", item_id)?;
+        self.client.invoke(
+            "ItemsGet",
+            json!({ "vault_id": vault_id, "item_id": item_id }),
+        )
+    }
+
+    /// Get multiple decrypted items from one vault in one SDK invocation.
+    pub fn get_all<S: AsRef<str>>(&mut self, vault_id: &str, item_ids: &[S]) -> Result<Value> {
+        validate_identifier("vault ID", vault_id)?;
+        if item_ids.is_empty() || item_ids.len() > 100 {
+            return Err(Error::InvalidArgument(
+                "item batch must contain between 1 and 100 IDs".to_owned(),
+            ));
+        }
+        let item_ids = item_ids
+            .iter()
+            .map(|id| id.as_ref())
+            .map(|id| {
+                validate_identifier("item ID", id)?;
+                Ok(id.to_owned())
+            })
+            .collect::<Result<Vec<_>>>()?;
+        self.client.invoke(
+            "ItemsGetAll",
+            json!({ "vault_id": vault_id, "item_ids": item_ids }),
+        )
+    }
+
+    /// List active items in a vault.
+    pub fn list(&mut self, vault_id: &str) -> Result<Vec<Value>> {
+        validate_identifier("vault ID", vault_id)?;
+        let result = self
+            .client
+            .invoke("ItemsList", json!({ "vault_id": vault_id, "filters": [] }))?;
+        result
+            .as_array()
+            .cloned()
+            .ok_or_else(|| Error::Protocol("items list response was not an array".to_owned()))
+    }
+}
+
+fn validate_identifier(kind: &str, value: &str) -> Result<()> {
+    if value.is_empty() || value.len() > 4 * 1024 {
+        return Err(Error::InvalidArgument(format!(
+            "{kind} is empty or too large"
+        )));
+    }
+    Ok(())
 }
 
 /// Secret-reference operations.
