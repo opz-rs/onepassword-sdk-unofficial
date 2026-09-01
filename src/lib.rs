@@ -10,6 +10,8 @@ mod transport;
 use serde_json::{Value, json};
 use thiserror::Error;
 
+const SDK_CORE_BUILD: &str = "0040102"; // Compatible with official Go SDK v0.4.1.
+
 const MAX_SECRET_REFERENCES: usize = 100;
 const MAX_REFERENCE_BYTES: usize = 4 * 1024;
 const MAX_REFERENCE_INPUT_BYTES: usize = 128 * 1024;
@@ -217,12 +219,12 @@ fn init_client(
     let config = json!({
         "serviceAccountToken": "",
         "programmingLanguage": "Rust",
-        "sdkVersion": env!("CARGO_PKG_VERSION"),
+        "sdkVersion": SDK_CORE_BUILD,
         "integrationName": integration_name,
         "integrationVersion": integration_version,
         "requestLibraryName": env!("CARGO_PKG_NAME"),
         "requestLibraryVersion": env!("CARGO_PKG_VERSION"),
-        "os": std::env::consts::OS,
+        "os": sdk_os_name(),
         "osVersion": "0.0.0",
         "architecture": std::env::consts::ARCH,
         "account_name": auth.account(),
@@ -329,6 +331,25 @@ fn validate_references(references: &[String]) -> Result<()> {
     Ok(())
 }
 
+fn sdk_os_name() -> &'static str {
+    #[cfg(target_os = "macos")]
+    {
+        "darwin"
+    }
+    #[cfg(target_os = "linux")]
+    {
+        "linux"
+    }
+    #[cfg(target_os = "windows")]
+    {
+        "windows"
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        std::env::consts::OS
+    }
+}
+
 fn protocol_error(error: impl std::fmt::Display) -> Error {
     Error::Protocol(error.to_string())
 }
@@ -336,6 +357,16 @@ fn protocol_error(error: impl std::fmt::Display) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sdk_os_name_matches_official_desktop_sdk_values() {
+        #[cfg(target_os = "macos")]
+        assert_eq!(sdk_os_name(), "darwin");
+        #[cfg(target_os = "linux")]
+        assert_eq!(sdk_os_name(), "linux");
+        #[cfg(target_os = "windows")]
+        assert_eq!(sdk_os_name(), "windows");
+    }
 
     #[test]
     fn desktop_auth_rejects_invalid_accounts() {

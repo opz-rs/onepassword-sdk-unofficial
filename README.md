@@ -58,7 +58,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-Batch resolution keeps one authenticated client alive:
+Batch resolution keeps one authenticated client alive. Prefer one long-lived `Client` and `resolve_all` calls over repeatedly creating clients; a single call accepts up to 100 references. Desktop authorization happens when the client is initialized, while subsequent secret resolutions reuse the authenticated client. If the desktop session expires, the SDK reinitializes the client once and retries.
+
 
 ```rust,no_run
 # use onepassword_sdk_unofficial::{Client, DesktopAuth};
@@ -82,7 +83,7 @@ let values = client.secrets().resolve_all(&[
 
 1Password also publishes the Rust `onepassword-ipc-client` transport crate. Its documentation warns that undocumented desktop IPC endpoints can change and should not be treated as supported integration points.
 
-Accordingly this repository keeps transport details private and treats the current macOS/Linux implementation as a proof, not a stable public protocol contract. The public Rust API is intentionally small so the transport can be replaced as 1Password documents or publishes more of the SDK integration surface.
+Accordingly this repository keeps transport details private and treats the current macOS/Linux implementation as a proof, not a stable public protocol contract. The current SDK core compatibility build is pinned to `0040102`, matching the official Go SDK v0.4.1 used for live conformance checks; that compatibility value is intentionally separate from this crate's own version. The public Rust API is intentionally small so the transport can be replaced as 1Password documents or publishes more of the SDK integration surface.
 
 ## Security
 
