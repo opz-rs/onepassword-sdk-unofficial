@@ -1,0 +1,20 @@
+[package]
+name = "onepassword-sdk-unofficial"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+description = "Unofficial Rust SDK experiment for 1Password desktop app integrations"
+license = "MIT"
+repository = "https://github.com/opz-rs/onepassword-sdk-unofficial"
+readme = "README.md"
+keywords = ["1password", "secrets", "sdk"]
+categories = ["api-bindings", "authentication"]
+
+[dependencies]
+base64 = "0.22"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[target.'cfg(any(target_os = "macos", target_os = "linux"))'.dependencies]
+libc = "0.2"
