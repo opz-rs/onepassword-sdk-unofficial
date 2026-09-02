@@ -99,6 +99,12 @@ Accordingly this repository keeps transport details private and treats the curre
 - Raw item writes are bounded to 1 MiB per item and 100 items / 8 MiB per batch; validation errors never include item contents.
 - This crate does not read or write the local 1Password SQLite database.
 
+## Testing
+
+The normal test suite runs on stable Rust and includes property-based tests powered by [`sile/noprop`](https://github.com/sile/noprop). The properties cover secret-reference size boundaries, response ordering with duplicate references, payload-shape equivalence, and upstream-error sanitization. Failure seeds can be replayed with the `OPSDK_*_NOPROP_SEED` variables printed by noprop.
+
+`noprop` currently requires Rust 1.88 or newer, but it is a dev-dependency only. The published library keeps its Rust 1.85 MSRV; CI checks `cargo check --lib --locked` separately with Rust 1.85.
+
 ## License
 
 MIT. Use of 1Password APIs, SDKs, desktop integrations, and developer tools remains subject to 1Password's applicable terms.

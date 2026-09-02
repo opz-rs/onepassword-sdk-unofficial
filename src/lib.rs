@@ -627,6 +627,87 @@ mod tests {
     }
 
     #[test]
+    fn pbt_reference_validation_matches_size_contract() -> noprop::TestResult {
+        let seed = noprop::seed_from_env_or_time("OPSDK_NOPROP_SEED")?;
+        let mut runner = noprop::Runner::new(seed);
+
+        runner.run(512, |ctx| {
+            let count = noprop::sample_with_boundaries(
+                ctx,
+                &[1usize, 2, MAX_SECRET_REFERENCES],
+                noprop::Ratio::one_nth(2),
+                |ctx| noprop::sample_usize_in(ctx, 1..=MAX_SECRET_REFERENCES),
+            );
+            let payload_len = noprop::sample_with_boundaries(
+                ctx,
+                &[
+                    0usize,
+                    1,
+                    MAX_REFERENCE_BYTES - "op://".len(),
+                    MAX_REFERENCE_BYTES - "op://".len() + 1,
+                    MAX_REFERENCE_BYTES,
+                ],
+                noprop::Ratio::one_nth(2),
+                |ctx| noprop::sample_usize_in(ctx, 0..=MAX_REFERENCE_BYTES),
+            );
+            let reference = format!("op://{}", "a".repeat(payload_len));
+            let references = vec![reference.clone(); count];
+            let expected_valid = reference.len() <= MAX_REFERENCE_BYTES
+                && reference.len().saturating_mul(count) <= MAX_REFERENCE_INPUT_BYTES;
+
+            assert_eq!(
+                validate_references(&references).is_ok(),
+                expected_valid,
+                "count={count}, reference_bytes={}",
+                reference.len()
+            );
+            Ok(())
+        })?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn pbt_extract_secrets_preserves_request_order_and_duplicates() -> noprop::TestResult {
+        let seed = noprop::seed_from_env_or_time("OPSDK_SECRET_ORDER_NOPROP_SEED")?;
+        let mut runner = noprop::Runner::new(seed);
+
+        runner.run(512, |ctx| {
+            let pool_len = noprop::sample_usize_in(ctx, 1..=16);
+            let request_len = noprop::sample_with_boundaries(
+                ctx,
+                &[1usize, 2, 32],
+                noprop::Ratio::one_nth(2),
+                |ctx| noprop::sample_usize_in(ctx, 1..=32),
+            );
+            let pool = (0..pool_len)
+                .map(|index| format!("op://vault/item/field-{index}"))
+                .collect::<Vec<_>>();
+            let mut responses = serde_json::Map::new();
+            for (index, reference) in pool.iter().enumerate() {
+                responses.insert(
+                    reference.clone(),
+                    json!({"content": {"secret": format!("secret-{index}")}}),
+                );
+            }
+
+            let mut references = Vec::with_capacity(request_len);
+            let mut expected = Vec::with_capacity(request_len);
+            for _ in 0..request_len {
+                let index = noprop::sample_usize_in(ctx, 0..pool_len);
+                references.push(pool[index].clone());
+                expected.push(format!("secret-{index}"));
+            }
+            let result = json!({"individualResponses": responses});
+
+            assert_eq!(extract_secrets(&result, &references)?, expected);
+            Ok(())
+        })?;
+
+        Ok(())
+    }
+
+    #[test]
     fn reference_errors_do_not_expose_secret_payloads() {
         let result = json!({
             "individualResponses": {

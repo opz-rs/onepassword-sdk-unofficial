@@ -214,6 +214,48 @@ mod tests {
     }
 
     #[test]
+    fn pbt_payload_decoder_round_trips_supported_shapes() -> noprop::TestResult {
+        let seed = noprop::seed_from_env_or_time("OPSDK_PAYLOAD_NOPROP_SEED")?;
+        let mut runner = noprop::Runner::new(seed);
+
+        runner.run(512, |ctx| {
+            let len = noprop::sample_with_boundaries(
+                ctx,
+                &[0usize, 1, 255, 1024],
+                noprop::Ratio::one_nth(2),
+                |ctx| noprop::sample_usize_in(ctx, 0..=1024),
+            );
+            let payload = noprop::sample_bytes_vec(ctx, len);
+            let byte_array = Value::Array(payload.iter().copied().map(Value::from).collect());
+            let base64_payload = json!(base64::engine::general_purpose::STANDARD.encode(&payload));
+
+            assert_eq!(decode_response_payload(Some(&byte_array))?, payload);
+            assert_eq!(decode_response_payload(Some(&base64_payload))?, payload);
+            Ok(())
+        })?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn pbt_upstream_error_classification_never_echoes_input() -> noprop::TestResult {
+        let seed = noprop::seed_from_env_or_time("OPSDK_ERROR_NOPROP_SEED")?;
+        let mut runner = noprop::Runner::new(seed);
+
+        runner.run(512, |ctx| {
+            let len = noprop::sample_usize_in(ctx, 0..=128);
+            let generated = noprop::sample_ascii_printable_string(ctx, len);
+            let upstream = format!("sensitive-canary::{generated}");
+            let rendered = classify_sdk_error(&upstream).to_string();
+            assert!(!rendered.contains(&upstream));
+            assert!(!rendered.contains("sensitive-canary::"));
+            Ok(())
+        })?;
+
+        Ok(())
+    }
+
+    #[test]
     fn upstream_errors_are_sanitized() {
         assert!(matches!(
             classify_sdk_error("Denied authorization for SDK client private detail"),
