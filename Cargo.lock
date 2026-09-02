@@ -34,7 +34,7 @@ checksum = "73026775e276cb339c67cdf71b2a8c067991fbe1cfbf25e17c7420afe6f829f7"
 
 [[package]]
 name = "onepassword-sdk-unofficial"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "base64",
  "libc",
