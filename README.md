@@ -103,7 +103,7 @@ Accordingly this repository keeps transport details private and treats the curre
 
 The normal test suite runs on stable Rust and includes property-based tests powered by [`sile/noprop`](https://github.com/sile/noprop). The properties cover secret-reference size boundaries, response ordering with duplicate references, payload-shape equivalence, and upstream-error sanitization. Failure seeds can be replayed with the `OPSDK_*_NOPROP_SEED` variables printed by noprop.
 
-`noprop` currently requires Rust 1.88 or newer, but it is a dev-dependency only. The published library keeps its Rust 1.85 MSRV; CI checks `cargo check --lib --locked` separately with Rust 1.85.
+The crate MSRV is Rust 1.88. This matches `noprop` and keeps the library, examples, and property-based tests on one supported toolchain floor. CI checks all targets with Rust 1.88 in addition to the stable cross-platform matrix.
 
 ## License
 
