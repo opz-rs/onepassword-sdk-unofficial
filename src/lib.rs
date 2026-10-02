@@ -627,6 +627,74 @@ mod tests {
     }
 
     #[test]
+    fn item_json_limits_include_serialization_overhead() {
+        let overhead = serde_json::to_vec(&json!({"value": ""})).unwrap().len();
+        for size in [
+            MAX_ITEM_JSON_BYTES - 1,
+            MAX_ITEM_JSON_BYTES,
+            MAX_ITEM_JSON_BYTES + 1,
+        ] {
+            let item = json!({"value": "a".repeat(size - overhead)});
+            assert_eq!(serde_json::to_vec(&item).unwrap().len(), size);
+            assert_eq!(
+                validate_item_json("item", &item).is_ok(),
+                size <= MAX_ITEM_JSON_BYTES
+            );
+        }
+    }
+
+    #[test]
+    fn item_batches_accept_limits_and_reject_excess_bytes() {
+        assert!(validate_item_batch("items", &vec![json!({}); MAX_ITEM_BATCH]).is_ok());
+        let overhead = serde_json::to_vec(&json!({"value": ""})).unwrap().len();
+        let full_item = json!({"value": "a".repeat(MAX_ITEM_JSON_BYTES - overhead)});
+        let mut items = vec![full_item; MAX_ITEM_BATCH_JSON_BYTES / MAX_ITEM_JSON_BYTES];
+        assert!(validate_item_batch("items", &items).is_ok());
+        items.push(json!({}));
+        assert!(validate_item_batch("items", &items).is_err());
+        assert!(validate_item_batch("items", &[json!({}), json!("canary")]).is_err());
+    }
+
+    #[test]
+    fn item_ids_preserve_order_duplicates_and_byte_limits() {
+        let ids = ["item-b", "item-a", "item-b"];
+        assert_eq!(validate_item_ids(&ids).unwrap(), ids);
+        let full_batch = vec!["item"; MAX_ITEM_BATCH];
+        assert_eq!(validate_item_ids(&full_batch).unwrap(), full_batch);
+        assert!(validate_item_ids(&[""]).is_err());
+        // UTF-8 limits are bytes, not character counts.
+        let boundary = "é".repeat(2048);
+        assert_eq!(
+            validate_item_ids(&[&boundary]).unwrap(),
+            [boundary.as_str()]
+        );
+        assert!(validate_item_ids(&["item", &(boundary + "a")]).is_err());
+    }
+
+    #[test]
+    fn desktop_accounts_enforce_inclusive_byte_limit() {
+        let boundary = "é".repeat(MAX_ACCOUNT_BYTES / 2);
+        assert_eq!(DesktopAuth::new(&boundary).unwrap().account(), boundary);
+        assert!(DesktopAuth::new(boundary + "a").is_err());
+    }
+
+    #[test]
+    fn integration_metadata_rejects_invalid_input_before_connecting() {
+        assert!(validate_metadata("integration name", "my-rust-app").is_ok());
+        let boundary = "é".repeat(512);
+        assert!(validate_metadata("integration name", &boundary).is_ok());
+        for invalid in [String::new(), "name\n".to_owned(), boundary + "a"] {
+            let auth = DesktopAuth::new("my.1password.com").unwrap();
+            let result = Client::builder(auth.clone())
+                .integration_name(&invalid)
+                .build();
+            assert!(matches!(result, Err(Error::InvalidArgument(_))));
+            let result = Client::builder(auth).integration_version(&invalid).build();
+            assert!(matches!(result, Err(Error::InvalidArgument(_))));
+        }
+    }
+
+    #[test]
     fn pbt_reference_validation_matches_size_contract() -> noprop::TestResult {
         let seed = noprop::seed_from_env_or_time("OPSDK_NOPROP_SEED")?;
         let mut runner = noprop::Runner::new(seed);
